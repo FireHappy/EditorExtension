@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 
 
-namespace Editor.Extension
+namespace EditorExtension
 {
     public class NamespaceBatchEditor : EditorWindow
     {

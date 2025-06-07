@@ -210,7 +210,7 @@ public class PackageGeneratorWindow : EditorWindow
     {
         string content = $@"using UnityEngine;
 
-namespace Editor.Extension
+namespace EditorExtension
 {{
     public class Sample : MonoBehaviour
     {{
