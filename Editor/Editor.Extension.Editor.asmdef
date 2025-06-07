@@ -1,0 +1,5 @@
+{
+  "name": "Editor.Extension.Editor",
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}
