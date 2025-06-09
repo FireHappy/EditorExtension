@@ -119,13 +119,9 @@ namespace EditorExtension
 
             if (t.childCount == 0)
             {
-                var comps = t.GetComponents<Component>();
-                if (comps.Length <= 1) // 只剩 Transform
-                {
-                    Transform parent = t.parent;
-                    Undo.DestroyObjectImmediate(t.gameObject);
-                    TryDeleteEmptyUpwards(parent);
-                }
+                Transform parent = t.parent;
+                Undo.DestroyObjectImmediate(t.gameObject);
+                TryDeleteEmptyUpwards(parent);
             }
         }
 
