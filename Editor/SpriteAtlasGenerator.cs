@@ -28,7 +28,7 @@ namespace EditorExtension
             GUILayout.Label("1. Sprite Source Folder", EditorStyles.label);
             GUILayout.BeginHorizontal();
             spriteFolderPath = EditorGUILayout.TextField(spriteFolderPath);
-            if (GUILayout.Button("📂", GUILayout.Width(30)))
+            if (GUILayout.Button("Open", GUILayout.Width(50)))
             {
                 string selected = EditorUtility.OpenFolderPanel("Select Sprite Folder", Application.dataPath, "");
                 string relative = ToRelativeAssetPath(selected);
@@ -43,7 +43,7 @@ namespace EditorExtension
             GUILayout.Label("2. Atlas Save Folder", EditorStyles.label);
             GUILayout.BeginHorizontal();
             atlasSaveFolder = EditorGUILayout.TextField(atlasSaveFolder);
-            if (GUILayout.Button("📂", GUILayout.Width(30)))
+            if (GUILayout.Button("Open", GUILayout.Width(50)))
             {
                 string selected = EditorUtility.OpenFolderPanel("Select Save Folder", Application.dataPath, "");
                 string relative = ToRelativeAssetPath(selected);
