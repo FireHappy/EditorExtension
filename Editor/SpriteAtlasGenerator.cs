@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.U2D;
 using System.IO;
 using System.Collections.Generic;
+
 namespace EditorExtension
 {
     public class SpriteAtlasGenerator : EditorWindow
@@ -13,7 +14,7 @@ namespace EditorExtension
         private string atlasSaveFolder = "Assets/Atlas";
         private string atlasName = "UI_Atlas";
 
-        [MenuItem("Tools/Generate Sprite Atlas")]
+        [MenuItem("Extension/Generate Sprite Atlas")]
         public static void ShowWindow()
         {
             GetWindow<SpriteAtlasGenerator>("Sprite Atlas Generator");
@@ -29,9 +30,12 @@ namespace EditorExtension
             spriteFolderPath = EditorGUILayout.TextField(spriteFolderPath);
             if (GUILayout.Button("📂", GUILayout.Width(30)))
             {
-                string selected = EditorUtility.OpenFolderPanel("Select Sprite Folder", "Assets", "");
-                if (!string.IsNullOrEmpty(selected))
-                    spriteFolderPath = ToRelativeAssetPath(selected);
+                string selected = EditorUtility.OpenFolderPanel("Select Sprite Folder", Application.dataPath, "");
+                string relative = ToRelativeAssetPath(selected);
+                if (!string.IsNullOrEmpty(relative))
+                    spriteFolderPath = relative;
+                else
+                    Debug.LogError("❌ Please select a folder inside the Assets directory.");
             }
             GUILayout.EndHorizontal();
 
@@ -41,16 +45,18 @@ namespace EditorExtension
             atlasSaveFolder = EditorGUILayout.TextField(atlasSaveFolder);
             if (GUILayout.Button("📂", GUILayout.Width(30)))
             {
-                string selected = EditorUtility.OpenFolderPanel("Select Save Folder", "Assets", "");
-                if (!string.IsNullOrEmpty(selected))
-                    atlasSaveFolder = ToRelativeAssetPath(selected);
+                string selected = EditorUtility.OpenFolderPanel("Select Save Folder", Application.dataPath, "");
+                string relative = ToRelativeAssetPath(selected);
+                if (!string.IsNullOrEmpty(relative))
+                    atlasSaveFolder = relative;
+                else
+                    Debug.LogError("❌ Please select a folder inside the Assets directory.");
             }
             GUILayout.EndHorizontal();
 
             // Atlas Name
             atlasName = EditorGUILayout.TextField("3. Atlas Name", atlasName);
 
-            // Button
             GUILayout.Space(10);
             if (GUILayout.Button("✅ Generate Sprite Atlas"))
             {
@@ -62,7 +68,7 @@ namespace EditorExtension
         {
             if (!Directory.Exists(spriteFolderPath))
             {
-                Debug.LogError($"Sprite folder not found: {spriteFolderPath}");
+                Debug.LogError($"❌ Sprite folder not found: {spriteFolderPath}");
                 return;
             }
 
@@ -99,53 +105,60 @@ namespace EditorExtension
                 name = "Default"
             });
 
-            // Collect all Sprites
-            List<Object> spritesToAdd = new List<Object>();
-            string[] files = Directory.GetFiles(spriteFolderPath, "*.*", SearchOption.AllDirectories);
+            // 添加图片资源
+            List<Object> assetsToAdd = new List<Object>();
+            string[] imageFiles = Directory.GetFiles(spriteFolderPath, "*.*", SearchOption.AllDirectories);
 
-            foreach (string file in files)
+            foreach (string file in imageFiles)
             {
                 if (file.EndsWith(".png") || file.EndsWith(".jpg"))
                 {
                     string assetPath = ToRelativeAssetPath(file);
-                    Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
-                    if (sprite != null)
+                    if (!string.IsNullOrEmpty(assetPath))
                     {
-                        spritesToAdd.Add(sprite);
+                        Object textureAsset = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+                        if (textureAsset != null)
+                        {
+                            assetsToAdd.Add(textureAsset);
+                        }
                     }
                 }
             }
 
-            if (spritesToAdd.Count == 0)
+            if (assetsToAdd.Count == 0)
             {
-                Debug.LogWarning("No sprites found to add.");
+                Debug.LogWarning("⚠️ No images found to add to the atlas.");
                 return;
             }
 
-            atlas.Add(spritesToAdd.ToArray());
+            atlas.Add(assetsToAdd.ToArray());
 
             AssetDatabase.CreateAsset(atlas, atlasPath);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            Debug.Log($"✅ Sprite Atlas '{atlasName}' created with {spritesToAdd.Count} sprites at: {atlasPath}");
+            Debug.Log($"✅ Sprite Atlas '{atlasName}' created with {assetsToAdd.Count} textures at: {atlasPath}");
         }
 
         /// <summary>
-        /// 转换为相对路径（例如 Assets/Sprites/XXX）
+        /// 将绝对路径转换为 Assets 相对路径
         /// </summary>
         private static string ToRelativeAssetPath(string absolutePath)
         {
-            string projectPath = Application.dataPath;
-            if (absolutePath.StartsWith(projectPath))
+            if (string.IsNullOrEmpty(absolutePath))
+                return null;
+
+            absolutePath = Path.GetFullPath(absolutePath).Replace("\\", "/");
+            string dataPath = Path.GetFullPath(Application.dataPath).Replace("\\", "/");
+
+            if (absolutePath.StartsWith(dataPath))
             {
-                return "Assets" + absolutePath.Substring(projectPath.Length);
+                return "Assets" + absolutePath.Substring(dataPath.Length);
             }
-            Debug.LogError("Selected folder is not inside the Assets folder!");
-            return absolutePath;
+
+            Debug.LogError("❌ Selected folder is not inside the Assets folder!");
+            return null;
         }
     }
-#endif
-
 }
-
+#endif
