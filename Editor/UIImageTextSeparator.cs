@@ -3,10 +3,28 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Linq;
+using System;
+
 namespace EditorExtension
 {
     public static class UIImageTextSeparator
     {
+        // ✅ 白名单：TextLayer 保留的组件类型
+        static readonly Type[] RenderAndLayoutWhitelist =
+        {
+            typeof(Transform),
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Text),
+            typeof(TextMeshProUGUI),
+            typeof(HorizontalLayoutGroup),
+            typeof(VerticalLayoutGroup),
+            typeof(ContentSizeFitter),
+            typeof(LayoutElement),
+            typeof(GridLayoutGroup),
+            typeof(CanvasGroup)
+        };
+
         [MenuItem("GameObject/UI/图文分离", false, 10)]
         static void SeparateImageAndText(MenuCommand command)
         {
@@ -28,7 +46,7 @@ namespace EditorExtension
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
 
-            // 创建新的父节点，命名与原始对象相同
+            // 创建新的父节点
             GameObject root = new GameObject(selected.name, typeof(RectTransform));
             Undo.RegisterCreatedObjectUndo(root, "Create MergedRoot");
             RectTransform rootRect = root.GetComponent<RectTransform>();
@@ -40,23 +58,23 @@ namespace EditorExtension
             root.transform.SetParent(parent, false);
             root.transform.SetSiblingIndex(siblingIndex);
 
-            // 创建 ImageLayer
-            GameObject imageLayer = Object.Instantiate(selected);
+            // 克隆为 ImageLayer
+            GameObject imageLayer = UnityEngine.Object.Instantiate(selected);
             imageLayer.name = "ImageLayer";
             Undo.RegisterCreatedObjectUndo(imageLayer, "Create ImageLayer");
             RemoveTextComponents(imageLayer);
 
-            // 创建 TextLayer
-            GameObject textLayer = Object.Instantiate(selected);
+            // 克隆为 TextLayer
+            GameObject textLayer = UnityEngine.Object.Instantiate(selected);
             textLayer.name = "TextLayer";
             Undo.RegisterCreatedObjectUndo(textLayer, "Create TextLayer");
             RemoveImageComponents(textLayer);
+            RemoveNonRenderAndLayoutComponents(textLayer);
+            DisableInteraction(textLayer);
 
             // 设置父子关系
             imageLayer.transform.SetParent(root.transform, false);
             textLayer.transform.SetParent(root.transform, false);
-
-            // 将局部位置/旋转/缩放归零（对齐父节点）
             ResetLocalTransform(imageLayer.transform);
             ResetLocalTransform(textLayer.transform);
 
@@ -77,44 +95,47 @@ namespace EditorExtension
             to.localRotation = from.localRotation;
         }
 
+        static void ResetLocalTransform(Transform t)
+        {
+            t.localPosition = Vector3.zero;
+            t.localRotation = Quaternion.identity;
+            t.localScale = Vector3.one;
+        }
+
         static void RemoveTextComponents(GameObject go)
         {
             var texts = go.GetComponentsInChildren<Text>(true).ToList();
             var tmps = go.GetComponentsInChildren<TextMeshProUGUI>(true).ToList();
 
             foreach (var text in texts)
-            {
                 RemoveComponentAndMaybeGameObject(text);
-            }
 
             foreach (var tmp in tmps)
-            {
                 RemoveComponentAndMaybeGameObject(tmp);
-            }
         }
 
         static void RemoveImageComponents(GameObject go)
         {
             var images = go.GetComponentsInChildren<Image>(true).ToList();
+            var raws = go.GetComponentsInChildren<RawImage>(true).ToList();
 
-            foreach (var image in images)
-            {
-                RemoveComponentAndMaybeGameObject(image);
-            }
+            foreach (var img in images)
+                RemoveComponentAndMaybeGameObject(img);
+
+            foreach (var raw in raws)
+                RemoveComponentAndMaybeGameObject(raw);
         }
 
         static void RemoveComponentAndMaybeGameObject(Component comp)
         {
             GameObject obj = comp.gameObject;
-
             Undo.DestroyObjectImmediate(comp);
-
             TryDeleteEmptyUpwards(obj.transform);
         }
 
         static void TryDeleteEmptyUpwards(Transform t)
         {
-            if (t == null)
+            if (t == null || t == t.root)
                 return;
 
             if (t.childCount == 0)
@@ -125,13 +146,37 @@ namespace EditorExtension
             }
         }
 
-        static void ResetLocalTransform(Transform t)
+        // ✅ 移除非白名单组件（TextLayer）
+        static void RemoveNonRenderAndLayoutComponents(GameObject go)
         {
-            t.localPosition = Vector3.zero;
-            t.localRotation = Quaternion.identity;
-            t.localScale = Vector3.one;
+            var allComponents = go.GetComponentsInChildren<Transform>(true)
+                .SelectMany(t => t.GetComponents<Component>())
+                .ToList();
+
+            foreach (var comp in allComponents)
+            {
+                if (comp == null) continue;
+
+                var type = comp.GetType();
+                bool isWhitelisted = RenderAndLayoutWhitelist.Any(whitelisted => whitelisted.IsAssignableFrom(type));
+
+                if (!isWhitelisted)
+                {
+                    Undo.DestroyObjectImmediate(comp);
+                }
+            }
+        }
+
+        // ✅ 禁用所有交互组件（ImageLayer）
+        static void DisableInteraction(GameObject go)
+        {
+            var canvasGroup = go.GetComponent<CanvasGroup>();
+            if (canvasGroup == null)
+            {
+                canvasGroup = Undo.AddComponent<CanvasGroup>(go.gameObject);
+            }
+            canvasGroup.blocksRaycasts = false;
+            canvasGroup.interactable = false;
         }
     }
-
 }
-
