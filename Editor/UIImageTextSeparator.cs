@@ -4,6 +4,8 @@ using UnityEngine.UI;
 using TMPro;
 using System.Linq;
 using System;
+using System.Reflection;
+using System.Collections.Generic;
 
 namespace EditorExtension
 {
@@ -22,7 +24,9 @@ namespace EditorExtension
             typeof(ContentSizeFitter),
             typeof(LayoutElement),
             typeof(GridLayoutGroup),
-            typeof(CanvasGroup)
+            typeof(CanvasGroup),
+            typeof(Mask),
+            typeof(RectMask2D)
         };
 
         [MenuItem("GameObject/UI/图文分离", false, 10)]
@@ -62,12 +66,19 @@ namespace EditorExtension
             GameObject imageLayer = UnityEngine.Object.Instantiate(selected);
             imageLayer.name = "ImageLayer";
             Undo.RegisterCreatedObjectUndo(imageLayer, "Create ImageLayer");
-            RemoveTextComponents(imageLayer);
 
             // 克隆为 TextLayer
             GameObject textLayer = UnityEngine.Object.Instantiate(selected);
             textLayer.name = "TextLayer";
             Undo.RegisterCreatedObjectUndo(textLayer, "Create TextLayer");
+
+            // 转移引用：ImageLayer 内组件字段中对 Text/TextMeshProUGUI 的引用转为指向 TextLayer 中对应的组件
+            TransferTextReferences(imageLayer, textLayer);
+
+            // 清除 ImageLayer 中的文本组件
+            RemoveTextComponents(imageLayer);
+
+            // 清理 TextLayer 中的图片组件和非白名单组件
             RemoveImageComponents(textLayer);
             RemoveNonRenderAndLayoutComponents(textLayer);
             DisableInteraction(textLayer);
@@ -177,6 +188,102 @@ namespace EditorExtension
             }
             canvasGroup.blocksRaycasts = false;
             canvasGroup.interactable = false;
+        }
+
+
+        // ========= 新增：引用转移功能 =========
+
+        static void TransferTextReferences(GameObject imageLayer, GameObject textLayer)
+        {
+            // 收集 ImageLayer 中所有 Text/TextMeshProUGUI 组件，按完整路径索引
+            var imageTexts = CollectTextComponentsByPath(imageLayer);
+
+            // 收集 TextLayer 中所有 Text/TextMeshProUGUI 组件，按完整路径索引
+            var textTexts = CollectTextComponentsByPath(textLayer);
+
+            // 遍历 ImageLayer 所有组件字段，寻找引用ImageLayer文本组件的字段，替换成 TextLayer 中对应路径的文本组件
+            var allComponents = imageLayer.GetComponentsInChildren<Component>(true);
+
+            foreach (var comp in allComponents)
+            {
+                if (comp == null) continue;
+
+                var type = comp.GetType();
+                var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+                foreach (var field in fields)
+                {
+                    if (!typeof(Component).IsAssignableFrom(field.FieldType))
+                        continue;
+
+                    var value = field.GetValue(comp) as Component;
+                    if (value == null) continue;
+
+                    // 判断该引用是否是ImageLayer内的文本组件
+                    string path = GetHierarchyPath(value.transform, imageLayer.transform);
+                    if (path == null) continue;
+
+                    if (imageTexts.TryGetValue(path, out Component imageTextComp))
+                    {
+                        if (imageTextComp == value)
+                        {
+                            // 找 TextLayer 中同路径的文本组件替代
+                            if (textTexts.TryGetValue(path, out Component textTextComp))
+                            {
+                                Undo.RecordObject(comp, "Transfer Text Reference");
+                                field.SetValue(comp, textTextComp);
+                                EditorUtility.SetDirty(comp);
+                            }
+                            else
+                            {
+                                Undo.RecordObject(comp, "Clear Text Reference");
+                                field.SetValue(comp, null);
+                                EditorUtility.SetDirty(comp);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        static Dictionary<string, Component> CollectTextComponentsByPath(GameObject root)
+        {
+            Dictionary<string, Component> dict = new Dictionary<string, Component>();
+
+            var texts = root.GetComponentsInChildren<Text>(true);
+            foreach (var t in texts)
+            {
+                string path = GetHierarchyPath(t.transform, root.transform);
+                if (!dict.ContainsKey(path))
+                    dict[path] = t;
+            }
+
+            var tmps = root.GetComponentsInChildren<TextMeshProUGUI>(true);
+            foreach (var t in tmps)
+            {
+                string path = GetHierarchyPath(t.transform, root.transform);
+                if (!dict.ContainsKey(path))
+                    dict[path] = t;
+            }
+
+            return dict;
+        }
+
+        // 获取从root开始到target的完整层级路径，比如 "Panel/Button/Text"
+        static string GetHierarchyPath(Transform target, Transform root)
+        {
+            if (target == null || root == null) return null;
+
+            var pathStack = new Stack<string>();
+            Transform current = target;
+            while (current != null && current != root)
+            {
+                pathStack.Push(current.name);
+                current = current.parent;
+            }
+            if (current != root) return null; // target不在root子层级中
+
+            return string.Join("/", pathStack);
         }
     }
 }
