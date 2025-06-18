@@ -47,70 +47,75 @@ namespace EditorExtension
                 return;
             }
 
-            Undo.IncrementCurrentGroup();
-            int undoGroup = Undo.GetCurrentGroup();
+            // 简单的撤销记录 - 记录整个对象的完整状态
+            Undo.RegisterFullObjectHierarchyUndo(selected, "UI图文分离");
 
-            // 创建新的父节点
-            GameObject root = new GameObject(selected.name, typeof(RectTransform));
-            Undo.RegisterCreatedObjectUndo(root, "Create MergedRoot");
-            RectTransform rootRect = root.GetComponent<RectTransform>();
-            CopyRectTransform(originalRect, rootRect);
+            try
+            {
+                // 获取所有子物体
+                Transform[] children = GetAllChildren(selected.transform);
 
-            // 保持层级结构
-            Transform parent = selected.transform.parent;
-            int siblingIndex = selected.transform.GetSiblingIndex();
-            root.transform.SetParent(parent, false);
-            root.transform.SetSiblingIndex(siblingIndex);
+                // 创建ImageLayer层
+                GameObject imageLayer = new GameObject("ImageLayer");
+                imageLayer.transform.SetParent(selected.transform);
+                imageLayer.AddComponent<RectTransform>();
+                StretchToFill(imageLayer.GetComponent<RectTransform>());
+                MoveAllChildrenToTarget(children, imageLayer.transform);
 
-            // 克隆为 ImageLayer
-            GameObject imageLayer = UnityEngine.Object.Instantiate(selected);
-            imageLayer.name = "ImageLayer";
-            Undo.RegisterCreatedObjectUndo(imageLayer, "Create ImageLayer");
+                // 克隆为 TextLayer
+                GameObject textLayer = UnityEngine.Object.Instantiate(imageLayer);
+                textLayer.transform.SetParent(selected.transform);
+                textLayer.name = "TextLayer";
 
-            // 克隆为 TextLayer
-            GameObject textLayer = UnityEngine.Object.Instantiate(selected);
-            textLayer.name = "TextLayer";
-            Undo.RegisterCreatedObjectUndo(textLayer, "Create TextLayer");
+                // 执行分离操作
+                TransferTextReferences(imageLayer, textLayer);
+                RemoveTextComponents(imageLayer);
+                RemoveImageComponents(textLayer);
+                RemoveNonRenderAndLayoutComponents(textLayer);
+                DisableInteraction(textLayer);
 
-            // 转移引用：ImageLayer 内组件字段中对 Text/TextMeshProUGUI 的引用转为指向 TextLayer 中对应的组件
-            TransferTextReferences(imageLayer, textLayer);
+                // 设置层级顺序：ImageLayer在下，TextLayer在上
+                imageLayer.transform.SetSiblingIndex(0);
+                textLayer.transform.SetSiblingIndex(1);
 
-            // 清除 ImageLayer 中的文本组件
-            RemoveTextComponents(imageLayer);
-
-            // 清理 TextLayer 中的图片组件和非白名单组件
-            RemoveImageComponents(textLayer);
-            RemoveNonRenderAndLayoutComponents(textLayer);
-            DisableInteraction(textLayer);
-
-            // 设置父子关系
-            imageLayer.transform.SetParent(root.transform, false);
-            textLayer.transform.SetParent(root.transform, false);
-            ResetLocalTransform(imageLayer.transform);
-            ResetLocalTransform(textLayer.transform);
-
-            // 删除原始对象
-            Undo.DestroyObjectImmediate(selected);
-
-            Undo.CollapseUndoOperations(undoGroup);
+                Debug.Log($"图文分离完成：{selected.name} -> ImageLayer + TextLayer");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"图文分离失败：{e.Message}");
+                // 如果出错，用户可以手动按 Ctrl+Z 撤销
+            }
         }
 
-        static void CopyRectTransform(RectTransform from, RectTransform to)
+        static Transform[] GetAllChildren(Transform selected)
         {
-            to.anchorMin = from.anchorMin;
-            to.anchorMax = from.anchorMax;
-            to.anchoredPosition = from.anchoredPosition;
-            to.sizeDelta = from.sizeDelta;
-            to.pivot = from.pivot;
-            to.localScale = from.localScale;
-            to.localRotation = from.localRotation;
+            Transform[] children = new Transform[selected.childCount];
+            for (int i = 0; i < selected.childCount; i++)
+            {
+                children[i] = selected.GetChild(i);
+            }
+            return children;
         }
 
-        static void ResetLocalTransform(Transform t)
+        static void MoveAllChildrenToTarget(Transform[] children, Transform target)
         {
-            t.localPosition = Vector3.zero;
-            t.localRotation = Quaternion.identity;
-            t.localScale = Vector3.one;
+            for (int i = 0; i < children.Length; i++)
+            {
+                if (children[i] != null)
+                {
+                    children[i].SetParent(target);
+                }
+            }
+        }
+
+        static void StretchToFill(RectTransform rt)
+        {
+            if (rt == null) return;
+
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = Vector2.zero;
         }
 
         static void RemoveTextComponents(GameObject go)
@@ -119,10 +124,16 @@ namespace EditorExtension
             var tmps = go.GetComponentsInChildren<TextMeshProUGUI>(true).ToList();
 
             foreach (var text in texts)
-                RemoveComponentAndMaybeGameObject(text);
+            {
+                if (text != null)
+                    RemoveComponentAndMaybeGameObject(text);
+            }
 
             foreach (var tmp in tmps)
-                RemoveComponentAndMaybeGameObject(tmp);
+            {
+                if (tmp != null)
+                    RemoveComponentAndMaybeGameObject(tmp);
+            }
         }
 
         static void RemoveImageComponents(GameObject go)
@@ -131,67 +142,114 @@ namespace EditorExtension
             var raws = go.GetComponentsInChildren<RawImage>(true).ToList();
 
             foreach (var img in images)
-                RemoveComponentAndMaybeGameObject(img);
+            {
+                if (img != null)
+                    RemoveComponentAndMaybeGameObject(img);
+            }
 
             foreach (var raw in raws)
-                RemoveComponentAndMaybeGameObject(raw);
+            {
+                if (raw != null)
+                    RemoveComponentAndMaybeGameObject(raw);
+            }
         }
 
         static void RemoveComponentAndMaybeGameObject(Component comp)
         {
+            if (comp == null) return;
+
             GameObject obj = comp.gameObject;
-            Undo.DestroyObjectImmediate(comp);
-            TryDeleteEmptyUpwards(obj.transform);
+            Transform transform = obj.transform;
+
+            // 先移除组件
+            UnityEngine.Object.DestroyImmediate(comp);
+
+            // 检查是否需要删除空的GameObject
+            TryDeleteEmptyGameObject(transform);
         }
 
-        static void TryDeleteEmptyUpwards(Transform t)
+        static void TryDeleteEmptyGameObject(Transform t)
         {
-            if (t == null || t == t.root)
+            if (t == null || t.name == "ImageLayer" || t.name == "TextLayer")
                 return;
 
-            if (t.childCount == 0)
+            // 检查是否为空对象（没有子对象，且只有基础组件）
+            if (t.childCount == 0 && IsEmptyGameObject(t.gameObject))
             {
                 Transform parent = t.parent;
-                Undo.DestroyObjectImmediate(t.gameObject);
-                TryDeleteEmptyUpwards(parent);
+                UnityEngine.Object.DestroyImmediate(t.gameObject);
+
+                // 递归检查父对象是否也变成了空对象
+                if (parent != null)
+                    TryDeleteEmptyGameObject(parent);
             }
         }
 
-        // ✅ 移除非白名单组件（TextLayer）
+        static bool IsEmptyGameObject(GameObject go)
+        {
+            if (go == null) return true;
+
+            var components = go.GetComponents<Component>();
+
+            // 只有Transform/RectTransform的对象认为是空对象
+            return components.Length <= 1 ||
+                   (components.Length == 1 && (components[0] is Transform || components[0] is RectTransform) || (components.Length == 2 && go.GetComponent<CanvasRenderer>() != null));
+        }
+
         static void RemoveNonRenderAndLayoutComponents(GameObject go)
         {
             var allComponents = go.GetComponentsInChildren<Transform>(true)
                 .SelectMany(t => t.GetComponents<Component>())
+                .Where(c => c != null)
                 .ToList();
+
+            var componentsToRemove = new List<Component>();
 
             foreach (var comp in allComponents)
             {
-                if (comp == null) continue;
-
                 var type = comp.GetType();
-                bool isWhitelisted = RenderAndLayoutWhitelist.Any(whitelisted => whitelisted.IsAssignableFrom(type));
+                bool isWhitelisted = RenderAndLayoutWhitelist.Any(whitelisted =>
+                    whitelisted.IsAssignableFrom(type));
 
                 if (!isWhitelisted)
                 {
-                    Undo.DestroyObjectImmediate(comp);
+
+                    componentsToRemove.Add(comp);
+                }
+            }
+
+            // 批量移除组件
+            foreach (var comp in componentsToRemove)
+            {
+                if (comp != null)
+                {
+                    try
+                    {
+                        UnityEngine.Object.DestroyImmediate(comp);
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogWarning($"无法移除组件 {comp.GetType().Name}: {e.Message}");
+                    }
                 }
             }
         }
 
-        // ✅ 禁用所有交互组件（ImageLayer）
         static void DisableInteraction(GameObject go)
         {
+            if (go == null) return;
+
             var canvasGroup = go.GetComponent<CanvasGroup>();
             if (canvasGroup == null)
             {
-                canvasGroup = Undo.AddComponent<CanvasGroup>(go.gameObject);
+                canvasGroup = go.AddComponent<CanvasGroup>();
             }
+
             canvasGroup.blocksRaycasts = false;
             canvasGroup.interactable = false;
         }
 
-
-        // ========= 新增：引用转移功能 =========
+        // ========= 引用转移功能 =========
 
         static void TransferTextReferences(GameObject imageLayer, GameObject textLayer)
         {
@@ -208,53 +266,111 @@ namespace EditorExtension
             {
                 if (comp == null) continue;
 
-                var type = comp.GetType();
-                var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                TransferComponentReferences(comp, imageTexts, textTexts, imageLayer.transform);
+            }
+        }
 
-                foreach (var field in fields)
+        static void TransferComponentReferences(Component comp,
+            Dictionary<string, Component> imageTexts,
+            Dictionary<string, Component> textTexts,
+            Transform imageLayerRoot)
+        {
+            var type = comp.GetType();
+
+            // 处理字段
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var field in fields)
+            {
+                TransferFieldReference(comp, field, imageTexts, textTexts, imageLayerRoot);
+            }
+
+            // 处理属性
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var property in properties)
+            {
+                if (property.CanRead && property.CanWrite)
                 {
-                    if (!typeof(Component).IsAssignableFrom(field.FieldType))
-                        continue;
-
-                    var value = field.GetValue(comp) as Component;
-                    if (value == null) continue;
-
-                    // 判断该引用是否是ImageLayer内的文本组件
-                    string path = GetHierarchyPath(value.transform, imageLayer.transform);
-                    if (path == null) continue;
-
-                    if (imageTexts.TryGetValue(path, out Component imageTextComp))
-                    {
-                        if (imageTextComp == value)
-                        {
-                            // 找 TextLayer 中同路径的文本组件替代
-                            if (textTexts.TryGetValue(path, out Component textTextComp))
-                            {
-                                Undo.RecordObject(comp, "Transfer Text Reference");
-                                field.SetValue(comp, textTextComp);
-                                EditorUtility.SetDirty(comp);
-                            }
-                            else
-                            {
-                                Undo.RecordObject(comp, "Clear Text Reference");
-                                field.SetValue(comp, null);
-                                EditorUtility.SetDirty(comp);
-                            }
-                        }
-                    }
+                    TransferPropertyReference(comp, property, imageTexts, textTexts, imageLayerRoot);
                 }
+            }
+        }
+
+        static void TransferFieldReference(Component comp, FieldInfo field,
+            Dictionary<string, Component> imageTexts,
+            Dictionary<string, Component> textTexts,
+            Transform imageLayerRoot)
+        {
+            if (!typeof(Component).IsAssignableFrom(field.FieldType))
+                return;
+
+            var value = field.GetValue(comp) as Component;
+            if (value == null) return;
+
+            string path = GetHierarchyPath(value.transform, imageLayerRoot);
+            if (path == null) return;
+
+            if (imageTexts.TryGetValue(path, out Component imageTextComp) && imageTextComp == value)
+            {
+                if (textTexts.TryGetValue(path, out Component textTextComp))
+                {
+                    field.SetValue(comp, textTextComp);
+                }
+                else
+                {
+                    field.SetValue(comp, null);
+                    Debug.LogWarning($"未找到对应的TextLayer文本组件：{path}");
+                }
+
+                EditorUtility.SetDirty(comp);
+            }
+        }
+
+        static void TransferPropertyReference(Component comp, PropertyInfo property,
+            Dictionary<string, Component> imageTexts,
+            Dictionary<string, Component> textTexts,
+            Transform imageLayerRoot)
+        {
+            if (!typeof(Component).IsAssignableFrom(property.PropertyType))
+                return;
+
+            try
+            {
+                var value = property.GetValue(comp) as Component;
+                if (value == null) return;
+
+                string path = GetHierarchyPath(value.transform, imageLayerRoot);
+                if (path == null) return;
+
+                if (imageTexts.TryGetValue(path, out Component imageTextComp) && imageTextComp == value)
+                {
+                    if (textTexts.TryGetValue(path, out Component textTextComp))
+                    {
+                        property.SetValue(comp, textTextComp);
+                    }
+                    else
+                    {
+                        property.SetValue(comp, null);
+                        Debug.LogWarning($"未找到对应的TextLayer文本组件：{path}");
+                    }
+
+                    EditorUtility.SetDirty(comp);
+                }
+            }
+            catch
+            {
+                // 忽略无法访问的属性
             }
         }
 
         static Dictionary<string, Component> CollectTextComponentsByPath(GameObject root)
         {
-            Dictionary<string, Component> dict = new Dictionary<string, Component>();
+            var dict = new Dictionary<string, Component>();
 
             var texts = root.GetComponentsInChildren<Text>(true);
             foreach (var t in texts)
             {
                 string path = GetHierarchyPath(t.transform, root.transform);
-                if (!dict.ContainsKey(path))
+                if (path != null && !dict.ContainsKey(path))
                     dict[path] = t;
             }
 
@@ -262,7 +378,7 @@ namespace EditorExtension
             foreach (var t in tmps)
             {
                 string path = GetHierarchyPath(t.transform, root.transform);
-                if (!dict.ContainsKey(path))
+                if (path != null && !dict.ContainsKey(path))
                     dict[path] = t;
             }
 
@@ -274,13 +390,17 @@ namespace EditorExtension
         {
             if (target == null || root == null) return null;
 
+            if (target == root) return "";
+
             var pathStack = new Stack<string>();
             Transform current = target;
+
             while (current != null && current != root)
             {
                 pathStack.Push(current.name);
                 current = current.parent;
             }
+
             if (current != root) return null; // target不在root子层级中
 
             return string.Join("/", pathStack);
