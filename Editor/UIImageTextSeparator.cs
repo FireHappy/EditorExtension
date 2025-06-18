@@ -78,6 +78,9 @@ namespace EditorExtension
                 imageLayer.transform.SetSiblingIndex(0);
                 textLayer.transform.SetSiblingIndex(1);
 
+                TryDeleteEmptyGameObject(imageLayer.transform);
+                TryDeleteEmptyGameObject(textLayer.transform);
+
                 Debug.Log($"图文分离完成：{selected.name} -> ImageLayer + TextLayer");
             }
             catch (System.Exception e)
@@ -158,42 +161,59 @@ namespace EditorExtension
         {
             if (comp == null) return;
 
-            GameObject obj = comp.gameObject;
-            Transform transform = obj.transform;
-
             // 先移除组件
             UnityEngine.Object.DestroyImmediate(comp);
-
-            // 检查是否需要删除空的GameObject
-            TryDeleteEmptyGameObject(transform);
         }
 
-        static void TryDeleteEmptyGameObject(Transform t)
+        static void TryDeleteEmptyGameObject(Transform root)
         {
-            if (t == null || t.name == "ImageLayer" || t.name == "TextLayer")
-                return;
+            if (root == null) return;
 
-            // 检查是否为空对象（没有子对象，且只有基础组件）
-            if (t.childCount == 0 && IsEmptyGameObject(t.gameObject))
+            bool hasEmpty = true;
+
+            while (hasEmpty)
             {
-                Transform parent = t.parent;
-                UnityEngine.Object.DestroyImmediate(t.gameObject);
+                hasEmpty = false;
 
-                // 递归检查父对象是否也变成了空对象
-                if (parent != null)
-                    TryDeleteEmptyGameObject(parent);
+                // 倒序遍历，避免删除过程中破坏结构
+                Transform[] allTransforms = root.GetComponentsInChildren<Transform>(true);
+                for (int i = allTransforms.Length - 1; i >= 0; i--)
+                {
+                    var t = allTransforms[i];
+                    if (t == null) continue;
+
+                    if (IsEmpty(t))
+                    {
+                        Undo.DestroyObjectImmediate(t.gameObject);
+                        hasEmpty = true;
+                        break; // 当前结构已改变，重新获取 Transform 列表
+                    }
+                }
             }
         }
 
-        static bool IsEmptyGameObject(GameObject go)
+
+
+        static bool IsEmpty(Transform tsf)
         {
-            if (go == null) return true;
+            if (tsf == null) return true;
 
-            var components = go.GetComponents<Component>();
+            var components = tsf.GetComponents<Component>();
+            foreach (var comp in components)
+            {
+                if (comp == null) continue;
 
-            // 只有Transform/RectTransform的对象认为是空对象
-            return components.Length <= 1 ||
-                   (components.Length == 1 && (components[0] is Transform || components[0] is RectTransform) || (components.Length == 2 && go.GetComponent<CanvasRenderer>() != null));
+                var type = comp.GetType();
+                if (type != typeof(Transform) &&
+                    type != typeof(RectTransform) &&
+                    type != typeof(CanvasRenderer))
+                {
+                    return false; // 有非基础组件
+                }
+            }
+
+            // 没有子节点 & 只有基础组件 → 视为空对象
+            return tsf.childCount == 0;
         }
 
         static void RemoveNonRenderAndLayoutComponents(GameObject go)
