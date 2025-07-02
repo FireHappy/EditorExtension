@@ -7,6 +7,7 @@ namespace EditorExtension
 {
     public class RemoveMissingScriptsEditor : EditorWindow
     {
+        private DefaultAsset folderAsset; // 拖入的文件夹
         private string folderPath = "Assets";
         private int totalPrefabs;
         private int totalRemoved;
@@ -26,24 +27,20 @@ namespace EditorExtension
 
             EditorGUI.BeginDisabledGroup(isProcessing);
             {
-                GUILayout.BeginHorizontal();
-                EditorGUILayout.TextField("Prefab Folder", folderPath);
-                if (GUILayout.Button("Browse", GUILayout.Width(80)))
+                GUILayout.Label("Drag Folder from Project Window", EditorStyles.label);
+                folderAsset = (DefaultAsset)EditorGUILayout.ObjectField("Prefab Folder", folderAsset, typeof(DefaultAsset), false);
+                if (folderAsset != null)
                 {
-                    string selectedPath = EditorUtility.OpenFolderPanel("Select Prefab Folder", "Assets", "");
-                    if (!string.IsNullOrEmpty(selectedPath))
+                    string assetPath = AssetDatabase.GetAssetPath(folderAsset);
+                    if (AssetDatabase.IsValidFolder(assetPath))
                     {
-                        if (selectedPath.StartsWith(Application.dataPath))
-                        {
-                            folderPath = "Assets" + selectedPath.Substring(Application.dataPath.Length);
-                        }
-                        else
-                        {
-                            Debug.LogWarning("Selected folder must be inside Assets folder!");
-                        }
+                        folderPath = assetPath;
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox("Please drag a valid folder from the Project window.", MessageType.Warning);
                     }
                 }
-                GUILayout.EndHorizontal();
 
                 GUILayout.Space(10);
                 if (GUILayout.Button("Start Cleanup"))
@@ -88,7 +85,6 @@ namespace EditorExtension
                 return;
             }
 
-            // 使用延迟调用避免阻塞UI
             EditorApplication.delayCall += ProcessNextPrefab;
         }
 
@@ -125,20 +121,17 @@ namespace EditorExtension
                 Debug.LogError($"❌ Failed to process prefab: {prefabPath}\nError: {e.Message}");
             }
 
-            // 处理下一个预制体
             EditorApplication.delayCall += ProcessNextPrefab;
         }
 
         private int RemoveMissingScriptsRecursive(GameObject gameObject)
         {
             int count = 0;
-            // 递归处理所有子对象
             foreach (Transform child in gameObject.transform)
             {
                 count += RemoveMissingScriptsRecursive(child.gameObject);
             }
 
-            // 移除当前对象上的丢失脚本
             count += GameObjectUtility.RemoveMonoBehavioursWithMissingScript(gameObject);
             return count;
         }

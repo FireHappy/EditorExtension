@@ -1,11 +1,10 @@
 {
-  "name": "com.rokid.editorextension",
-  "displayName": "Editor Extension",
-  "version": "1.0.0",
-  "description": "A Unity package.",
-  "unity": "2020.3",
-  "author": {
-    "name": "chenlin",
-    "email": ""
-  }
+    "name": "com.rokid.editorextension",
+    "displayName": "Rokid Editor Extension",
+    "version": "1.0.0",
+    "description": "A Editor Extension Package.",
+    "unity": "2020.3",
+    "author": {
+        "name": "rokid"
+    }
 }
