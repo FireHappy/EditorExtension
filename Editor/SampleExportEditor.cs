@@ -23,13 +23,19 @@ namespace EditorExtension
 
     public class SampleExporter : EditorWindow
     {
-        private DefaultAsset sourceFolder; // 拖入的文件夹
-        private string sampleFolderName = "MySample01"; // 目标 Sample 子文件夹名
-        private string packageName = "com.yourcompany.yourpackage"; // 目标包名
+        private DefaultAsset sourceFolder;
+        private string sampleFolderName = "MySample01";
+        private string packageName = "com.yourcompany.yourpackage";
         private bool clearTargetBeforeCopy = true;
 
+        private const string PREF_PREFIX = "SampleExporter_";
+
         [MenuItem("Extension/Export Sample to Package")]
-        public static void ShowWindow() => GetWindow<SampleExporter>("Sample Exporter");
+        public static void ShowWindow()
+        {
+            var window = GetWindow<SampleExporter>("Sample Exporter");
+            window.LoadPrefs();
+        }
 
         private void OnGUI()
         {
@@ -43,7 +49,41 @@ namespace EditorExtension
 
             EditorGUILayout.Space();
             if (GUILayout.Button("🚀 Export Sample"))
+            {
+                SavePrefs();
                 ExportSample();
+            }
+        }
+
+        private void OnDestroy()
+        {
+            SavePrefs();
+        }
+
+        private void LoadPrefs()
+        {
+            sampleFolderName = EditorPrefs.GetString(PREF_PREFIX + "SampleFolderName", sampleFolderName);
+            packageName = EditorPrefs.GetString(PREF_PREFIX + "PackageName", packageName);
+            clearTargetBeforeCopy = EditorPrefs.GetBool(PREF_PREFIX + "ClearTarget", clearTargetBeforeCopy);
+
+            var sourcePath = EditorPrefs.GetString(PREF_PREFIX + "SourceFolderPath", string.Empty);
+            if (!string.IsNullOrEmpty(sourcePath))
+            {
+                sourceFolder = AssetDatabase.LoadAssetAtPath<DefaultAsset>(sourcePath);
+            }
+        }
+
+        private void SavePrefs()
+        {
+            EditorPrefs.SetString(PREF_PREFIX + "SampleFolderName", sampleFolderName);
+            EditorPrefs.SetString(PREF_PREFIX + "PackageName", packageName);
+            EditorPrefs.SetBool(PREF_PREFIX + "ClearTarget", clearTargetBeforeCopy);
+
+            if (sourceFolder != null)
+            {
+                string assetPath = AssetDatabase.GetAssetPath(sourceFolder);
+                EditorPrefs.SetString(PREF_PREFIX + "SourceFolderPath", assetPath);
+            }
         }
 
         private void ExportSample()
@@ -61,7 +101,6 @@ namespace EditorExtension
                 return;
             }
 
-            // 定位包根目录
             var projectRoot = Directory.GetParent(Application.dataPath).FullName;
             var packagePath = Path.Combine(projectRoot, "Packages", packageName);
             if (!Directory.Exists(packagePath))
@@ -70,7 +109,6 @@ namespace EditorExtension
                 return;
             }
 
-            // 从 package.json 解析 samples 配置
             string packageJsonPath = Path.Combine(packagePath, "package.json");
             string packageSamplesPath = null;
             if (File.Exists(packageJsonPath))
@@ -81,7 +119,6 @@ namespace EditorExtension
                     var pkgData = JsonUtility.FromJson<PackageJson>(jsonText);
                     if (pkgData?.samples != null && pkgData.samples.Length > 0)
                     {
-                        // 获取所有样本路径的根目录名称
                         var roots = new HashSet<string>();
                         foreach (var item in pkgData.samples)
                         {
@@ -92,7 +129,6 @@ namespace EditorExtension
                         }
                         if (roots.Count > 0)
                         {
-                            // 取第一个作为 Samples 根目录
                             packageSamplesPath = Path.Combine(packagePath, roots.First());
                         }
                     }
@@ -103,7 +139,6 @@ namespace EditorExtension
                 }
             }
 
-            // 如果没有解析到，则自动查找或创建以 "Samples" 开头的目录
             if (string.IsNullOrEmpty(packageSamplesPath) || !Directory.Exists(packageSamplesPath))
             {
                 var samplesDirs = Directory.GetDirectories(packagePath)
@@ -119,7 +154,6 @@ namespace EditorExtension
                 }
             }
 
-            // 目标 Sample 文件夹
             var targetSamplePath = Path.Combine(packageSamplesPath, sampleFolderName);
             if (clearTargetBeforeCopy && Directory.Exists(targetSamplePath))
             {
@@ -128,7 +162,6 @@ namespace EditorExtension
             }
             Directory.CreateDirectory(targetSamplePath);
 
-            // 拷贝
             CopyDirectory(sourcePath, targetSamplePath);
 
             AssetDatabase.Refresh();
@@ -137,14 +170,13 @@ namespace EditorExtension
 
         private void CopyDirectory(string sourceDir, string destinationDir)
         {
-            // Copy all files including .meta
             foreach (var filePath in Directory.GetFiles(sourceDir))
             {
                 var fileName = Path.GetFileName(filePath);
                 var destFile = Path.Combine(destinationDir, fileName);
                 File.Copy(filePath, destFile, true);
             }
-            // Recursively copy subdirs
+
             foreach (var dirPath in Directory.GetDirectories(sourceDir))
             {
                 var dirName = Path.GetFileName(dirPath);
